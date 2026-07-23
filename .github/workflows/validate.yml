@@ -1,0 +1,60 @@
+name: Validate Harbor task
+
+on:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Harbor
+        run: uv tool install --python 3.12 harbor
+
+      - name: Check Docker and Harbor
+        run: |
+          docker version
+          harbor --version
+
+      - name: Run oracle
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          harbor run -p . -a oracle 2>&1 | tee oracle-output.txt
+
+      - name: Run no-op agent
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          harbor run -p . --agent nop 2>&1 | tee nop-output.txt
+
+      - name: Collect verifier results
+        if: always()
+        run: |
+          find . -type f \( -name reward.txt -o -name ctrf.json \) -print > verifier-files.txt
+
+          while IFS= read -r file; do
+            echo "===== $file =====" >> verifier-results.txt
+            cat "$file" >> verifier-results.txt
+            echo >> verifier-results.txt
+          done < verifier-files.txt
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harbor-verifier-results
+          path: |
+            oracle-output.txt
+            nop-output.txt
+            verifier-files.txt
+            verifier-results.txt
+          if-no-files-found: warn
